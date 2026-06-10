@@ -167,6 +167,21 @@ namespace SkillMover
         public int FileCount { get; set; }
         public int CopiedFileCount { get; set; }
         public bool IsSingleFile { get; set; }
+        public List<string> SkippedItems { get; set; }
+    }
+
+    internal sealed class CopyPlan
+    {
+        public List<string> Files { get; private set; }
+        public List<string> Directories { get; private set; }
+        public List<string> SkippedItems { get; private set; }
+
+        public CopyPlan()
+        {
+            Files = new List<string>();
+            Directories = new List<string>();
+            SkippedItems = new List<string>();
+        }
     }
 
     internal sealed class CopyProgress
@@ -178,6 +193,27 @@ namespace SkillMover
 
     internal sealed class MainForm : Form
     {
+        private static readonly HashSet<string> ExcludedDirectoryNames =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".git",
+                ".svn",
+                ".hg",
+                ".idea",
+                ".vs",
+                ".vscode",
+                "__pycache__",
+                "node_modules"
+            };
+
+        private static readonly HashSet<string> ExcludedFileNames =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ".DS_Store",
+                "Thumbs.db",
+                "desktop.ini"
+            };
+
         private readonly Color PageBackground = Color.FromArgb(244, 246, 248);
         private readonly Color TextColor = Color.FromArgb(23, 33, 43);
         private readonly Color MutedColor = Color.FromArgb(102, 112, 133);
@@ -630,24 +666,33 @@ namespace SkillMover
                 return;
             }
 
-            string[] files = Directory.GetFiles(source, "*", SearchOption.AllDirectories);
-            int total = files.Length * destinations.Count;
+            CopyPlan plan = BuildCopyPlan(source);
+            int total = plan.Files.Count * destinations.Count;
             int copied = 0;
 
             foreach (string destination in destinations)
             {
                 string finalTarget = Path.Combine(destination, new DirectoryInfo(source).Name);
-                CopyDirectoryTree(source, finalTarget);
+                CopyDirectoryTree(source, finalTarget, plan.Directories, plan.SkippedItems);
 
-                foreach (string file in files)
+                foreach (string file in plan.Files)
                 {
                     string relative = file.Substring(source.Length)
                         .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                     string targetFile = Path.Combine(finalTarget, relative);
-                    Directory.CreateDirectory(Path.GetDirectoryName(targetFile));
-                    File.Copy(file, targetFile, true);
-                    File.SetLastWriteTimeUtc(targetFile, File.GetLastWriteTimeUtc(file));
-                    copied++;
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(targetFile));
+                        File.Copy(file, targetFile, true);
+                        File.SetLastWriteTimeUtc(targetFile, File.GetLastWriteTimeUtc(file));
+                        copied++;
+                    }
+                    catch (Exception ex)
+                    {
+                        plan.SkippedItems.Add(
+                            relative + " -> " + destination + "：" + ex.Message);
+                    }
+
                     int percentage = total == 0 ? 100 : (int)((long)copied * 100 / total);
                     worker.ReportProgress(percentage, new CopyProgress
                     {
@@ -657,15 +702,24 @@ namespace SkillMover
                     });
                 }
 
-                Directory.SetLastWriteTimeUtc(finalTarget, Directory.GetLastWriteTimeUtc(source));
+                try
+                {
+                    Directory.SetLastWriteTimeUtc(finalTarget, Directory.GetLastWriteTimeUtc(source));
+                }
+                catch (Exception ex)
+                {
+                    plan.SkippedItems.Add(
+                        new DirectoryInfo(source).Name + " -> " + destination + "：" + ex.Message);
+                }
             }
 
             e.Result = new CopyResult
             {
                 DestinationCount = destinations.Count,
-                FileCount = files.Length,
+                FileCount = plan.Files.Count,
                 CopiedFileCount = copied,
-                IsSingleFile = false
+                IsSingleFile = false,
+                SkippedItems = plan.SkippedItems
             };
         }
 
@@ -690,7 +744,8 @@ namespace SkillMover
                 DestinationCount = destinations.Count,
                 FileCount = 1,
                 CopiedFileCount = copied,
-                IsSingleFile = true
+                IsSingleFile = true,
+                SkippedItems = new List<string>()
             };
         }
 
@@ -712,15 +767,91 @@ namespace SkillMover
             return copied;
         }
 
-        private static void CopyDirectoryTree(string source, string target)
+        private static CopyPlan BuildCopyPlan(string source)
+        {
+            CopyPlan plan = new CopyPlan();
+            Stack<string> pending = new Stack<string>();
+            pending.Push(source);
+
+            while (pending.Count > 0)
+            {
+                string current = pending.Pop();
+                string[] directories;
+                try
+                {
+                    directories = Directory.GetDirectories(current);
+                }
+                catch (Exception ex)
+                {
+                    plan.SkippedItems.Add(GetRelativePath(source, current) + "：" + ex.Message);
+                    continue;
+                }
+
+                foreach (string directory in directories)
+                {
+                    string name = Path.GetFileName(directory);
+                    if (ExcludedDirectoryNames.Contains(name))
+                    {
+                        plan.SkippedItems.Add(GetRelativePath(source, directory) + "（已排除）");
+                        continue;
+                    }
+
+                    plan.Directories.Add(directory);
+                    pending.Push(directory);
+                }
+
+                string[] files;
+                try
+                {
+                    files = Directory.GetFiles(current);
+                }
+                catch (Exception ex)
+                {
+                    plan.SkippedItems.Add(GetRelativePath(source, current) + "：" + ex.Message);
+                    continue;
+                }
+
+                foreach (string file in files)
+                {
+                    if (ExcludedFileNames.Contains(Path.GetFileName(file)))
+                    {
+                        plan.SkippedItems.Add(GetRelativePath(source, file) + "（已排除）");
+                        continue;
+                    }
+                    plan.Files.Add(file);
+                }
+            }
+
+            return plan;
+        }
+
+        private static void CopyDirectoryTree(
+            string source,
+            string target,
+            IList<string> directories,
+            IList<string> skippedItems)
         {
             Directory.CreateDirectory(target);
-            foreach (string directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+            foreach (string directory in directories)
             {
-                string relative = directory.Substring(source.Length)
-                    .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                Directory.CreateDirectory(Path.Combine(target, relative));
+                string relative = GetRelativePath(source, directory);
+                try
+                {
+                    Directory.CreateDirectory(Path.Combine(target, relative));
+                }
+                catch (Exception ex)
+                {
+                    skippedItems.Add(relative + "：" + ex.Message);
+                }
             }
+        }
+
+        private static string GetRelativePath(string root, string path)
+        {
+            if (string.Equals(root, path, StringComparison.OrdinalIgnoreCase))
+                return new DirectoryInfo(root).Name;
+            return path.Substring(root.Length)
+                .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         }
 
         private void CopyProgressChanged(object sender, ProgressChangedEventArgs e)
@@ -745,16 +876,36 @@ namespace SkillMover
 
             CopyResult result = (CopyResult)e.Result;
             progressBar.Value = 100;
-            statusLabel.Text = result.IsSingleFile
-                ? "分发完成：1 个文件 × " + result.DestinationCount + " 个目标"
-                : "搬运完成：" + result.FileCount + " 个文件 × " +
-                    result.DestinationCount + " 个目标";
-            MessageBox.Show(this,
+            int skippedCount = result.SkippedItems == null ? 0 : result.SkippedItems.Count;
+            statusLabel.Text = skippedCount > 0
+                ? "搬运完成，已跳过 " + skippedCount + " 项"
+                : result.IsSingleFile
+                    ? "分发完成：1 个文件 × " + result.DestinationCount + " 个目标"
+                    : "搬运完成：" + result.FileCount + " 个文件 × " +
+                        result.DestinationCount + " 个目标";
+
+            string message =
                 (result.IsSingleFile ? "已将文件分发到 " : "已将完整文件夹复制到 ") +
                 result.DestinationCount + " 个目标位置。\r\n" +
                 "源文件数：" + result.FileCount + "\r\n" +
-                "完成复制：" + result.CopiedFileCount + " 个文件",
-                "搬运完成", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                "完成复制：" + result.CopiedFileCount + " 个文件";
+
+            if (skippedCount > 0)
+            {
+                string details = string.Join(
+                    "\r\n",
+                    result.SkippedItems.Take(8).Select(item => "• " + item).ToArray());
+                if (skippedCount > 8)
+                    details += "\r\n• 另有 " + (skippedCount - 8) + " 项";
+                message += "\r\n跳过：" + skippedCount + " 项\r\n\r\n" + details;
+            }
+
+            MessageBox.Show(
+                this,
+                message,
+                skippedCount > 0 ? "搬运完成（有跳过项）" : "搬运完成",
+                MessageBoxButtons.OK,
+                skippedCount > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
         }
 
         private void SetCopying(bool copying)
