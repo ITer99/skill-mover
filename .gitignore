@@ -1,0 +1,20 @@
+# Build output
+build/
+.native-build/
+__pycache__/
+*.py[cod]
+
+# Legacy PyInstaller metadata
+*.spec
+
+# Local icon verification files
+icon-preview.png
+icon-preview-exe.png
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
