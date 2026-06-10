@@ -1,6 +1,7 @@
 # Build output
 build/
 .native-build/
+dist/
 __pycache__/
 *.py[cod]
 
@@ -17,4 +18,3 @@ icon-preview-exe.png
 .DS_Store
 Thumbs.db
 Desktop.ini
-

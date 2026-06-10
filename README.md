@@ -70,11 +70,12 @@ Z:\SharedFiles
 
 ## 使用方法
 
-1. 双击运行 `dist\skill搬运工.exe`。
-2. 点击“浏览”，选择需要分发的源文件夹。
-3. 点击“添加目标”，逐个添加接收文件的目录。
-4. 确认目标列表后，点击“开始搬运”。
-5. 等待进度完成。
+1. 前往 [Releases](https://github.com/ITer99/skill-mover/releases) 下载最新版 EXE。
+2. 双击运行下载的 `skill-mover-版本号.exe`。
+3. 点击“浏览”，选择需要分发的源文件夹。
+4. 点击“添加目标”，逐个添加接收文件的目录。
+5. 确认目标列表后，点击“开始搬运”。
+6. 等待进度完成。
 
 目标路径添加一次后会自动保存。下次启动程序时，目标列表会直接恢复，只需要重新选择本次要分发的源文件夹。
 
@@ -133,13 +134,14 @@ C:\Users\User\.codex\skills\MySkill
 
 ## 项目结构
 
-- `dist\skill搬运工.exe`：可直接运行的最终程序；
 - `SkillMover.cs`：Windows 原生 WinForms 源码；
 - `build-native.ps1`：原生 EXE 编译脚本；
 - `assets\skill搬运工.ico`：程序多尺寸图标；
 - `make_icon.py`：图标生成脚本；
 - `app.pyw`、`copy_engine.py`：早期 Python 版本及复制逻辑参考；
 - `test_copy_engine.py`：复制与配置读写测试。
+
+Git 仓库只保存源码、文档和构建资源。编译后的 EXE 不进入源码仓库，正式版本统一通过 [GitHub Releases](https://github.com/ITer99/skill-mover/releases) 发布。
 
 ## 重新编译
 
